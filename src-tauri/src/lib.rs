@@ -356,7 +356,13 @@ macro_rules! app_invoke_handler {
             commands::reinit_telemetry,
             commands::list_views,
             commands::save_view_cmd,
-            commands::delete_view_cmd
+            commands::delete_view_cmd,
+            commands::create_thread,
+            commands::add_comment,
+            commands::list_threads_for_note,
+            commands::update_thread_status,
+            commands::promote_to_decision,
+            commands::list_decisions
         ]
     };
 }
