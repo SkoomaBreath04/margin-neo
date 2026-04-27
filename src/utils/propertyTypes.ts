@@ -116,8 +116,15 @@ export function getEffectiveDisplayMode(
 function resolveDateFromValue(value: string): Date | null {
   const isoMatch = value.match(ISO_DATE_RE)
   if (isoMatch) {
-    const date = new Date(isoMatch[0])
-    return Number.isNaN(date.getTime()) ? null : date
+    const matched = isoMatch[0]
+    const parsed = new Date(matched)
+    if (Number.isNaN(parsed.getTime())) return null
+    // Plain YYYY-MM-DD parses as UTC midnight per spec, which shifts the
+    // displayed day by one in negative-offset timezones. Re-anchor to local
+    // midnight so toLocaleDateString shows the user-intended day everywhere.
+    const hasTimeComponent = matched.length > 10
+    if (hasTimeComponent) return parsed
+    return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
   }
 
   const parts = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
