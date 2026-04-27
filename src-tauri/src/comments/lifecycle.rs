@@ -82,6 +82,70 @@ pub fn create_thread(vault: &Path, input: CreateThreadInput) -> Result<Thread, S
     Ok(thread)
 }
 
+/// Inputs for `add_comment`. Same dependency-injection style as
+/// `CreateThreadInput`: caller provides clock and identity.
+#[derive(Debug, Clone)]
+pub struct AddCommentInput {
+    pub thread_id: String,
+    pub body: String,
+    pub author: String,
+    pub head_sha: String,
+    pub now: DateTime<Utc>,
+}
+
+fn validate_add_comment(input: &AddCommentInput) -> Result<(), String> {
+    let mut empty: Option<&str> = None;
+    if input.thread_id.is_empty() {
+        empty = Some("thread_id");
+    } else if input.body.is_empty() {
+        empty = Some("body");
+    } else if input.author.is_empty() {
+        empty = Some("author");
+    } else if input.head_sha.is_empty() {
+        empty = Some("head_sha");
+    }
+    match empty {
+        Some(field) => Err(format!("add_comment: {field} must not be empty")),
+        None => Ok(()),
+    }
+}
+
+/// Append a comment to an existing thread, persist the updated
+/// thread, and return the new comment. The thread anchor is left
+/// untouched — replies inherit the thread's anchor by construction
+/// (decision 5 in the fork's local plan).
+pub fn add_comment(vault: &Path, input: AddCommentInput) -> Result<Comment, String> {
+    validate_add_comment(&input)?;
+
+    let mut thread = store::read_thread(vault, &input.thread_id)?;
+    let comment = Comment {
+        id: generate_comment_id(),
+        author: input.author,
+        body: input.body,
+        created_at: input.now,
+        created_at_sha: input.head_sha,
+    };
+    thread.comments.push(comment.clone());
+    store::write_thread(vault, &thread)?;
+    Ok(comment)
+}
+
+/// Return every thread anchored to `note_rel_path`, sorted oldest-
+/// first by `thread.created_at`. Threads on other notes are not
+/// returned. Returns an empty vec when no threads exist for the
+/// note (or when no threads exist at all).
+pub fn list_threads_for_note(vault: &Path, note_rel_path: &str) -> Result<Vec<Thread>, String> {
+    let mut threads: Vec<Thread> = store::list_thread_ids(vault)?
+        .into_iter()
+        .map(|id| store::read_thread(vault, &id))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|t| t.note_rel_path == note_rel_path)
+        .collect();
+    threads.sort_by_key(|t| t.created_at);
+    Ok(threads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +314,132 @@ mod tests {
             thread.anchor.content_hash,
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    fn add_comment_input(thread_id: &str, body: &str) -> AddCommentInput {
+        AddCommentInput {
+            thread_id: thread_id.to_string(),
+            body: body.to_string(),
+            author: "Reviewer Two <r2@example.com>".into(),
+            head_sha: "1".repeat(40),
+            now: Utc.with_ymd_and_hms(2026, 4, 27, 10, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn add_comment_appends_to_existing_thread() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        add_comment(dir.path(), add_comment_input(&thread.id, "Reply body")).unwrap();
+        let on_disk = read_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(on_disk.comments.len(), 2);
+        assert_eq!(on_disk.comments[1].body, "Reply body");
+    }
+
+    #[test]
+    fn add_comment_returns_new_comment_with_cmt_prefix() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let comment = add_comment(dir.path(), add_comment_input(&thread.id, "Reply body")).unwrap();
+        assert!(comment.id.starts_with("cmt_"));
+        assert_eq!(comment.id.len(), 36);
+    }
+
+    #[test]
+    fn add_comment_does_not_change_existing_comment() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let original_first = thread.comments[0].clone();
+        add_comment(dir.path(), add_comment_input(&thread.id, "Reply body")).unwrap();
+        let on_disk = read_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(on_disk.comments[0], original_first);
+    }
+
+    #[test]
+    fn add_comment_uses_provided_now_and_head_sha() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let input = add_comment_input(&thread.id, "Reply body");
+        let expected_now = input.now;
+        let expected_sha = input.head_sha.clone();
+        let comment = add_comment(dir.path(), input).unwrap();
+        assert_eq!(comment.created_at, expected_now);
+        assert_eq!(comment.created_at_sha, expected_sha);
+    }
+
+    #[test]
+    fn add_comment_rejects_unknown_thread() {
+        let dir = tempdir().unwrap();
+        let result = add_comment(dir.path(), add_comment_input("thr_missing", "Reply body"));
+        assert!(result.is_err());
+    }
+
+    type AddCommentFieldMutator = fn(&mut AddCommentInput);
+
+    #[test]
+    fn add_comment_rejects_empty_required_fields() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let mutators: Vec<(&str, AddCommentFieldMutator)> = vec![
+            ("thread_id", |i| i.thread_id.clear()),
+            ("body", |i| i.body.clear()),
+            ("author", |i| i.author.clear()),
+            ("head_sha", |i| i.head_sha.clear()),
+        ];
+        for (field, mutate) in mutators {
+            let mut input = add_comment_input(&thread.id, "Reply body");
+            mutate(&mut input);
+            let result = add_comment(dir.path(), input);
+            assert!(result.is_err(), "{field} accepted as empty");
+            let err = result.unwrap_err();
+            assert!(
+                err.contains(field),
+                "error should mention {field}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_threads_for_note_returns_empty_when_no_threads() {
+        let dir = tempdir().unwrap();
+        let threads = list_threads_for_note(dir.path(), "projects/example.md").unwrap();
+        assert!(threads.is_empty());
+    }
+
+    #[test]
+    fn list_threads_for_note_returns_only_matching_note() {
+        let dir = tempdir().unwrap();
+        let mut a = sample_input();
+        a.note_rel_path = "projects/a.md".into();
+        let mut b = sample_input();
+        b.note_rel_path = "projects/b.md".into();
+        let mut c = sample_input();
+        c.note_rel_path = "projects/a.md".into();
+        create_thread(dir.path(), a).unwrap();
+        create_thread(dir.path(), b).unwrap();
+        create_thread(dir.path(), c).unwrap();
+
+        let on_a = list_threads_for_note(dir.path(), "projects/a.md").unwrap();
+        let on_b = list_threads_for_note(dir.path(), "projects/b.md").unwrap();
+        assert_eq!(on_a.len(), 2);
+        assert!(on_a.iter().all(|t| t.note_rel_path == "projects/a.md"));
+        assert_eq!(on_b.len(), 1);
+        assert!(on_b.iter().all(|t| t.note_rel_path == "projects/b.md"));
+    }
+
+    #[test]
+    fn list_threads_for_note_returns_chronological_order() {
+        let dir = tempdir().unwrap();
+        let mut earlier = sample_input();
+        earlier.now = Utc.with_ymd_and_hms(2026, 4, 27, 8, 0, 0).unwrap();
+        let mut later = sample_input();
+        later.now = Utc.with_ymd_and_hms(2026, 4, 27, 12, 0, 0).unwrap();
+        // Create the later one first to verify sort doesn't just preserve insertion order.
+        create_thread(dir.path(), later).unwrap();
+        create_thread(dir.path(), earlier).unwrap();
+
+        let threads = list_threads_for_note(dir.path(), "projects/example.md").unwrap();
+        assert_eq!(threads.len(), 2);
+        assert!(threads[0].created_at < threads[1].created_at);
     }
 }
