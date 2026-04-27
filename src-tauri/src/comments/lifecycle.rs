@@ -230,6 +230,38 @@ pub fn promote_to_decision(
     Ok(decision)
 }
 
+/// Optional filters for `list_decisions`. `Default::default()` is
+/// the no-filter case (every decision is returned). Filters compose
+/// with logical AND when more than one is set.
+#[derive(Debug, Clone, Default)]
+pub struct DecisionFilter {
+    pub note_rel_path: Option<String>,
+    pub owner: Option<String>,
+}
+
+/// List every decision in the vault, optionally filtered by
+/// `note_rel_path` and/or `owner` equality, sorted oldest-first by
+/// `created_at`. Returns an empty vec when no decisions match (or
+/// when no decisions exist at all).
+pub fn list_decisions(vault: &Path, filter: &DecisionFilter) -> Result<Vec<Decision>, String> {
+    let mut decisions: Vec<Decision> = store::list_decision_ids(vault)?
+        .into_iter()
+        .map(|id| store::read_decision(vault, &id))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|d| match &filter.note_rel_path {
+            Some(p) => &d.note_rel_path == p,
+            None => true,
+        })
+        .filter(|d| match &filter.owner {
+            Some(o) => &d.owner == o,
+            None => true,
+        })
+        .collect();
+    decisions.sort_by_key(|d| d.created_at);
+    Ok(decisions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,5 +739,97 @@ mod tests {
                 "error should mention {field}, got: {err}"
             );
         }
+    }
+
+    /// Build a thread on `note` and immediately promote it to a
+    /// decision owned by `owner` and timestamped at `when`. Used by
+    /// the `list_decisions` tests to populate a small fixture
+    /// without re-stating the full input plumbing each time.
+    fn promote_with(dir: &Path, note: &str, owner: &str, when: DateTime<Utc>) -> Decision {
+        let mut thread_in = sample_input();
+        thread_in.note_rel_path = note.into();
+        thread_in.now = when;
+        let thread = create_thread(dir, thread_in).unwrap();
+        let mut p = promote_input(&thread.id);
+        p.owner = owner.into();
+        p.now = when;
+        promote_to_decision(dir, p).unwrap()
+    }
+
+    #[test]
+    fn list_decisions_when_no_decisions_returns_empty() {
+        let dir = tempdir().unwrap();
+        let decisions = list_decisions(dir.path(), &DecisionFilter::default()).unwrap();
+        assert!(decisions.is_empty());
+    }
+
+    #[test]
+    fn list_decisions_no_filter_returns_all() {
+        let dir = tempdir().unwrap();
+        let t = Utc.with_ymd_and_hms(2026, 4, 27, 11, 0, 0).unwrap();
+        promote_with(dir.path(), "projects/a.md", "Owner A", t);
+        promote_with(dir.path(), "projects/b.md", "Owner B", t);
+        let decisions = list_decisions(dir.path(), &DecisionFilter::default()).unwrap();
+        assert_eq!(decisions.len(), 2);
+    }
+
+    #[test]
+    fn list_decisions_filters_by_note_rel_path() {
+        let dir = tempdir().unwrap();
+        let t = Utc.with_ymd_and_hms(2026, 4, 27, 11, 0, 0).unwrap();
+        promote_with(dir.path(), "projects/a.md", "Owner A", t);
+        promote_with(dir.path(), "projects/b.md", "Owner B", t);
+        let filter = DecisionFilter {
+            note_rel_path: Some("projects/a.md".into()),
+            ..Default::default()
+        };
+        let decisions = list_decisions(dir.path(), &filter).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].note_rel_path, "projects/a.md");
+    }
+
+    #[test]
+    fn list_decisions_filters_by_owner() {
+        let dir = tempdir().unwrap();
+        let t = Utc.with_ymd_and_hms(2026, 4, 27, 11, 0, 0).unwrap();
+        promote_with(dir.path(), "projects/a.md", "Owner A", t);
+        promote_with(dir.path(), "projects/b.md", "Owner B", t);
+        let filter = DecisionFilter {
+            owner: Some("Owner B".into()),
+            ..Default::default()
+        };
+        let decisions = list_decisions(dir.path(), &filter).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].owner, "Owner B");
+    }
+
+    #[test]
+    fn list_decisions_filters_by_both_compose_with_and() {
+        let dir = tempdir().unwrap();
+        let t = Utc.with_ymd_and_hms(2026, 4, 27, 11, 0, 0).unwrap();
+        promote_with(dir.path(), "projects/a.md", "Owner A", t);
+        promote_with(dir.path(), "projects/a.md", "Owner B", t);
+        promote_with(dir.path(), "projects/b.md", "Owner A", t);
+        let filter = DecisionFilter {
+            note_rel_path: Some("projects/a.md".into()),
+            owner: Some("Owner A".into()),
+        };
+        let decisions = list_decisions(dir.path(), &filter).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].note_rel_path, "projects/a.md");
+        assert_eq!(decisions[0].owner, "Owner A");
+    }
+
+    #[test]
+    fn list_decisions_returns_chronological_order() {
+        let dir = tempdir().unwrap();
+        let earlier = Utc.with_ymd_and_hms(2026, 4, 27, 8, 0, 0).unwrap();
+        let later = Utc.with_ymd_and_hms(2026, 4, 27, 14, 0, 0).unwrap();
+        // Create the later one first to defeat insertion-order accidents.
+        promote_with(dir.path(), "projects/a.md", "Owner A", later);
+        promote_with(dir.path(), "projects/b.md", "Owner B", earlier);
+        let decisions = list_decisions(dir.path(), &DecisionFilter::default()).unwrap();
+        assert_eq!(decisions.len(), 2);
+        assert!(decisions[0].created_at < decisions[1].created_at);
     }
 }
