@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::anchor::content_hash;
 use super::store;
-use super::types::{Anchor, Comment, Thread, ThreadStatus};
+use super::types::{Anchor, Comment, Decision, Thread, ThreadStatus};
 
 /// Inputs for `create_thread`. Owned strings so the struct can be
 /// built directly from JSON-deserialized Tauri command arguments.
@@ -49,6 +49,10 @@ fn generate_thread_id() -> String {
 
 fn generate_comment_id() -> String {
     format!("cmt_{}", Uuid::new_v4().simple())
+}
+
+fn generate_decision_id() -> String {
+    format!("dec_{}", Uuid::new_v4().simple())
 }
 
 /// Create a new thread anchored to one block of one note, with one
@@ -160,6 +164,70 @@ pub fn update_thread_status(
     thread.status = new_status;
     store::write_thread(vault, &thread)?;
     Ok(thread)
+}
+
+/// Inputs for `promote_to_decision`. Mirrors the dependency-
+/// injection style: caller supplies `now`, `head_sha`, and identity.
+#[derive(Debug, Clone)]
+pub struct PromoteToDecisionInput {
+    pub thread_id: String,
+    pub title: String,
+    pub rationale: String,
+    pub alternatives: Option<String>,
+    pub owner: String,
+    pub head_sha: String,
+    pub now: DateTime<Utc>,
+}
+
+fn validate_promote_to_decision(input: &PromoteToDecisionInput) -> Result<(), String> {
+    let mut empty: Option<&str> = None;
+    if input.thread_id.is_empty() {
+        empty = Some("thread_id");
+    } else if input.title.is_empty() {
+        empty = Some("title");
+    } else if input.rationale.is_empty() {
+        empty = Some("rationale");
+    } else if input.owner.is_empty() {
+        empty = Some("owner");
+    } else if input.head_sha.is_empty() {
+        empty = Some("head_sha");
+    }
+    match empty {
+        Some(field) => Err(format!("promote_to_decision: {field} must not be empty")),
+        None => Ok(()),
+    }
+}
+
+/// Promote a thread to a decision. Reads the source thread (to
+/// inherit its `note_rel_path` and confirm it exists), writes a new
+/// `Decision` with `dec_<32hex>` id and `source_thread_id` set to
+/// the thread, then marks the source thread `Resolved`. Per
+/// decision 4 in the fork's local plan, the decision intentionally
+/// does NOT carry the thread's anchor forward — decisions are
+/// durable artifacts that outlive the text they were made about,
+/// and the back-link to the source thread (and through it the
+/// historical anchor + content hash) is enough for traceability.
+pub fn promote_to_decision(
+    vault: &Path,
+    input: PromoteToDecisionInput,
+) -> Result<Decision, String> {
+    validate_promote_to_decision(&input)?;
+
+    let thread = store::read_thread(vault, &input.thread_id)?;
+    let decision = Decision {
+        id: generate_decision_id(),
+        source_thread_id: thread.id.clone(),
+        note_rel_path: thread.note_rel_path.clone(),
+        title: input.title,
+        rationale: input.rationale,
+        alternatives: input.alternatives,
+        owner: input.owner,
+        created_at: input.now,
+        created_at_sha: input.head_sha,
+    };
+    store::write_decision(vault, &decision)?;
+    update_thread_status(vault, &thread.id, ThreadStatus::Resolved)?;
+    Ok(decision)
 }
 
 #[cfg(test)]
@@ -516,6 +584,128 @@ mod tests {
         ] {
             let updated = update_thread_status(dir.path(), &thread.id, status).unwrap();
             assert_eq!(updated.status, status);
+        }
+    }
+
+    fn promote_input(thread_id: &str) -> PromoteToDecisionInput {
+        PromoteToDecisionInput {
+            thread_id: thread_id.to_string(),
+            title: "Adopt sidecar storage".into(),
+            rationale: "Avoids fragmenting by SHA.".into(),
+            alternatives: Some("Use a backend datastore.".into()),
+            owner: "Reviewer Two <r2@example.com>".into(),
+            head_sha: "1".repeat(40),
+            now: Utc.with_ymd_and_hms(2026, 4, 27, 11, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn promote_to_decision_creates_decision_with_dec_prefix() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let decision = promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        assert!(decision.id.starts_with("dec_"));
+        assert_eq!(decision.id.len(), 36);
+    }
+
+    #[test]
+    fn promote_to_decision_links_to_source_thread() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let decision = promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        assert_eq!(decision.source_thread_id, thread.id);
+    }
+
+    #[test]
+    fn promote_to_decision_inherits_note_rel_path_from_thread() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let decision = promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        assert_eq!(decision.note_rel_path, thread.note_rel_path);
+    }
+
+    #[test]
+    fn promote_to_decision_marks_source_thread_resolved() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        let on_disk = read_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(on_disk.status, ThreadStatus::Resolved);
+    }
+
+    #[test]
+    fn promote_to_decision_persists_decision_to_disk() {
+        use crate::comments::store::read_decision;
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let decision = promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        let on_disk = read_decision(dir.path(), &decision.id).unwrap();
+        assert_eq!(on_disk, decision);
+    }
+
+    #[test]
+    fn promote_to_decision_with_alternatives_some() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let decision = promote_to_decision(dir.path(), promote_input(&thread.id)).unwrap();
+        assert_eq!(
+            decision.alternatives.as_deref(),
+            Some("Use a backend datastore.")
+        );
+    }
+
+    #[test]
+    fn promote_to_decision_with_alternatives_none() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let mut input = promote_input(&thread.id);
+        input.alternatives = None;
+        let decision = promote_to_decision(dir.path(), input).unwrap();
+        assert!(decision.alternatives.is_none());
+    }
+
+    #[test]
+    fn promote_to_decision_uses_provided_now_and_head_sha() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let input = promote_input(&thread.id);
+        let now = input.now;
+        let head_sha = input.head_sha.clone();
+        let decision = promote_to_decision(dir.path(), input).unwrap();
+        assert_eq!(decision.created_at, now);
+        assert_eq!(decision.created_at_sha, head_sha);
+    }
+
+    #[test]
+    fn promote_to_decision_rejects_unknown_thread() {
+        let dir = tempdir().unwrap();
+        let result = promote_to_decision(dir.path(), promote_input("thr_missing"));
+        assert!(result.is_err());
+    }
+
+    type PromoteFieldMutator = fn(&mut PromoteToDecisionInput);
+
+    #[test]
+    fn promote_to_decision_rejects_empty_required_fields() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let mutators: Vec<(&str, PromoteFieldMutator)> = vec![
+            ("thread_id", |i| i.thread_id.clear()),
+            ("title", |i| i.title.clear()),
+            ("rationale", |i| i.rationale.clear()),
+            ("owner", |i| i.owner.clear()),
+            ("head_sha", |i| i.head_sha.clear()),
+        ];
+        for (field, mutate) in mutators {
+            let mut input = promote_input(&thread.id);
+            mutate(&mut input);
+            let result = promote_to_decision(dir.path(), input);
+            assert!(result.is_err(), "{field} accepted as empty");
+            let err = result.unwrap_err();
+            assert!(
+                err.contains(field),
+                "error should mention {field}, got: {err}"
+            );
         }
     }
 }
