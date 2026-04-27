@@ -25,6 +25,7 @@ import {
   resolveRawModeContent,
 } from './editorRawModeSync'
 import { useRawModeWithFlush } from './useRawModeWithFlush'
+import { createCommentExtension } from '../features/comments/commentExtension'
 import { createArrowLigaturesExtension } from './arrowLigaturesExtension'
 import { useFilenameAutolinkGuard } from './useFilenameAutolinkGuard'
 import './Editor.css'
@@ -185,7 +186,7 @@ function useEditorSetup({
     schema,
     uploadFile: (file: File) => uploadImageFile(file, vaultPathRef.current),
     _tiptapOptions: { injectNonce: RUNTIME_STYLE_NONCE },
-    extensions: [createArrowLigaturesExtension()],
+    extensions: [createArrowLigaturesExtension(), createCommentExtension()],
   })
   useFilenameAutolinkGuard(editor)
   const activeTab = tabs.find((t) => t.entry.path === activeTabPath) ?? null
