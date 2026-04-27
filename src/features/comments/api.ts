@@ -16,6 +16,8 @@ export interface CreateThreadArgs {
   blockId: string
   blockText: string
   initialBody: string
+  /** Required so the interface satisfies Tauri's `InvokeArgs = Record<string, unknown>`. */
+  [key: string]: unknown
 }
 
 export function createThread(args: CreateThreadArgs): Promise<Thread> {
@@ -26,6 +28,7 @@ export interface AddCommentArgs {
   vaultPath: string
   threadId: string
   body: string
+  [key: string]: unknown
 }
 
 export function addComment(args: AddCommentArgs): Promise<Comment> {
@@ -35,6 +38,7 @@ export function addComment(args: AddCommentArgs): Promise<Comment> {
 export interface ListThreadsForNoteArgs {
   vaultPath: string
   noteRelPath: string
+  [key: string]: unknown
 }
 
 export function listThreadsForNote(args: ListThreadsForNoteArgs): Promise<Thread[]> {
@@ -45,6 +49,7 @@ export interface UpdateThreadStatusArgs {
   vaultPath: string
   threadId: string
   newStatus: ThreadStatus
+  [key: string]: unknown
 }
 
 export function updateThreadStatus(args: UpdateThreadStatusArgs): Promise<Thread> {
@@ -57,6 +62,7 @@ export interface PromoteToDecisionArgs {
   title: string
   rationale: string
   alternatives: string | null
+  [key: string]: unknown
 }
 
 export function promoteToDecision(args: PromoteToDecisionArgs): Promise<Decision> {
