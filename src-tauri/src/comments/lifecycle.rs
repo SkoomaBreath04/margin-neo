@@ -146,6 +146,22 @@ pub fn list_threads_for_note(vault: &Path, note_rel_path: &str) -> Result<Vec<Th
     Ok(threads)
 }
 
+/// Update the status of an existing thread (e.g. `Open` → `Resolved`
+/// when a reviewer marks the discussion settled, or `Open` →
+/// `Orphaned` when the underlying block has been deleted). All
+/// other thread fields — id, anchor, comments, timestamps — are
+/// preserved. Returns the updated thread.
+pub fn update_thread_status(
+    vault: &Path,
+    thread_id: &str,
+    new_status: ThreadStatus,
+) -> Result<Thread, String> {
+    let mut thread = store::read_thread(vault, thread_id)?;
+    thread.status = new_status;
+    store::write_thread(vault, &thread)?;
+    Ok(thread)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +457,65 @@ mod tests {
         let threads = list_threads_for_note(dir.path(), "projects/example.md").unwrap();
         assert_eq!(threads.len(), 2);
         assert!(threads[0].created_at < threads[1].created_at);
+    }
+
+    #[test]
+    fn update_thread_status_open_to_resolved() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let updated = update_thread_status(dir.path(), &thread.id, ThreadStatus::Resolved).unwrap();
+        assert_eq!(updated.status, ThreadStatus::Resolved);
+    }
+
+    #[test]
+    fn update_thread_status_open_to_orphaned() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        let updated = update_thread_status(dir.path(), &thread.id, ThreadStatus::Orphaned).unwrap();
+        assert_eq!(updated.status, ThreadStatus::Orphaned);
+    }
+
+    #[test]
+    fn update_thread_status_persists_to_disk() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        update_thread_status(dir.path(), &thread.id, ThreadStatus::Resolved).unwrap();
+        let on_disk = read_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(on_disk.status, ThreadStatus::Resolved);
+    }
+
+    #[test]
+    fn update_thread_status_preserves_other_fields() {
+        let dir = tempdir().unwrap();
+        let original = create_thread(dir.path(), sample_input()).unwrap();
+        let updated =
+            update_thread_status(dir.path(), &original.id, ThreadStatus::Resolved).unwrap();
+        assert_eq!(updated.id, original.id);
+        assert_eq!(updated.note_rel_path, original.note_rel_path);
+        assert_eq!(updated.anchor, original.anchor);
+        assert_eq!(updated.comments, original.comments);
+        assert_eq!(updated.created_at, original.created_at);
+        assert_eq!(updated.created_at_sha, original.created_at_sha);
+    }
+
+    #[test]
+    fn update_thread_status_rejects_unknown_thread() {
+        let dir = tempdir().unwrap();
+        let result = update_thread_status(dir.path(), "thr_missing", ThreadStatus::Resolved);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_thread_status_can_round_trip_through_all_states() {
+        let dir = tempdir().unwrap();
+        let thread = create_thread(dir.path(), sample_input()).unwrap();
+        for status in [
+            ThreadStatus::Resolved,
+            ThreadStatus::Orphaned,
+            ThreadStatus::Open,
+        ] {
+            let updated = update_thread_status(dir.path(), &thread.id, status).unwrap();
+            assert_eq!(updated.status, status);
+        }
     }
 }
