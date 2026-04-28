@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./api', () => ({
   listThreadsForNote: vi.fn(),
   addComment: vi.fn(),
+  updateThreadStatus: vi.fn(),
 }))
 
-import { addComment, listThreadsForNote } from './api'
+import { addComment, listThreadsForNote, updateThreadStatus } from './api'
 
 import { CommentsPanel } from './CommentsPanel'
 import {
@@ -18,6 +19,7 @@ import type { Comment, Thread, ThreadStatus } from './types'
 
 const mockedList = vi.mocked(listThreadsForNote)
 const mockedAddComment = vi.mocked(addComment)
+const mockedUpdateStatus = vi.mocked(updateThreadStatus)
 
 interface ThreadOverrides {
   id?: string
@@ -55,6 +57,7 @@ function thread(overrides: ThreadOverrides = {}): Thread {
 beforeEach(() => {
   mockedList.mockReset()
   mockedAddComment.mockReset()
+  mockedUpdateStatus.mockReset()
 })
 
 afterEach(() => {
@@ -413,5 +416,110 @@ describe('CommentsPanel — reply composer', () => {
       (await screen.findByTestId('comments-panel-composer-error')).textContent,
     ).toMatch(/disk full/)
     expect(input.value).toBe('first try')
+  })
+})
+
+describe('CommentsPanel — status actions', () => {
+  it('open thread shows Resolve and Orphan; resolved thread shows Reopen', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+      thread({ id: 't2', status: 'resolved' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    expect(screen.getByTestId('comments-panel-status-resolved')).toBeInTheDocument()
+    expect(screen.getByTestId('comments-panel-status-orphaned')).toBeInTheDocument()
+    expect(screen.queryByTestId('comments-panel-status-open')).toBeNull()
+
+    // Back to list, switch tab, open the resolved thread.
+    fireEvent.click(screen.getByTestId('comments-panel-back'))
+    fireEvent.click(await screen.findByTestId('comments-panel-tab-resolved'))
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    expect(screen.getByTestId('comments-panel-status-open')).toBeInTheDocument()
+    expect(screen.queryByTestId('comments-panel-status-resolved')).toBeNull()
+  })
+
+  it('clicking Resolve calls updateThreadStatus with resolved and dispatches THREAD_UPDATED_EVENT', async () => {
+    mockedList.mockResolvedValue([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+    mockedUpdateStatus.mockResolvedValueOnce({} as never)
+
+    const updatedListener = vi.fn()
+    window.addEventListener(THREAD_UPDATED_EVENT, updatedListener)
+
+    try {
+      render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+      fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+      fireEvent.click(screen.getByTestId('comments-panel-status-resolved'))
+
+      await waitFor(() => {
+        expect(mockedUpdateStatus).toHaveBeenCalledWith({
+          vaultPath: '/v',
+          threadId: 't1',
+          newStatus: 'resolved',
+        })
+      })
+      expect(updatedListener).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener(THREAD_UPDATED_EVENT, updatedListener)
+    }
+  })
+
+  it('clicking Orphan calls updateThreadStatus with orphaned', async () => {
+    mockedList.mockResolvedValue([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+    mockedUpdateStatus.mockResolvedValueOnce({} as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+    fireEvent.click(screen.getByTestId('comments-panel-status-orphaned'))
+
+    await waitFor(() => {
+      expect(mockedUpdateStatus).toHaveBeenCalledWith({
+        vaultPath: '/v',
+        threadId: 't1',
+        newStatus: 'orphaned',
+      })
+    })
+  })
+
+  it('clicking Reopen on a resolved thread calls updateThreadStatus with open', async () => {
+    mockedList.mockResolvedValue([
+      thread({ id: 't1', status: 'resolved' }),
+    ] as never)
+    mockedUpdateStatus.mockResolvedValueOnce({} as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-tab-resolved'))
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+    fireEvent.click(screen.getByTestId('comments-panel-status-open'))
+
+    await waitFor(() => {
+      expect(mockedUpdateStatus).toHaveBeenCalledWith({
+        vaultPath: '/v',
+        threadId: 't1',
+        newStatus: 'open',
+      })
+    })
+  })
+
+  it('shows an inline error when updateThreadStatus fails', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+    mockedUpdateStatus.mockRejectedValueOnce(new Error('write conflict'))
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+    fireEvent.click(screen.getByTestId('comments-panel-status-resolved'))
+
+    expect(
+      (await screen.findByTestId('comments-panel-status-error')).textContent,
+    ).toMatch(/write conflict/)
   })
 })

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
-import { addComment } from './api'
+import { addComment, updateThreadStatus } from './api'
 import {
   FOCUS_THREAD_EVENT,
   THREAD_CREATED_EVENT,
@@ -212,7 +212,7 @@ function ThreadDetailLayout({ thread, vaultPath, onBack }: ThreadDetailLayoutPro
       data-thread-id={thread.id}
       className="flex w-80 shrink-0 flex-col border-l border-border bg-background"
     >
-      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-sm font-medium">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm font-medium">
         <button
           type="button"
           data-testid="comments-panel-back"
@@ -234,6 +234,7 @@ function ThreadDetailLayout({ thread, vaultPath, onBack }: ThreadDetailLayoutPro
         >
           {STATUS_LABELS[thread.status]}
         </Badge>
+        <StatusActions thread={thread} vaultPath={vaultPath} />
       </header>
 
       <div className="flex-1 overflow-y-auto px-3 py-2">
@@ -248,6 +249,92 @@ function ThreadDetailLayout({ thread, vaultPath, onBack }: ThreadDetailLayoutPro
         <ReplyComposer vaultPath={vaultPath} threadId={thread.id} />
       )}
     </aside>
+  )
+}
+
+interface StatusActionsProps {
+  thread: Thread
+  vaultPath: string
+}
+
+interface StatusTransition {
+  label: string
+  next: ThreadStatus
+  variant: 'default' | 'secondary' | 'ghost' | 'outline'
+}
+
+function transitionsFor(status: ThreadStatus): StatusTransition[] {
+  if (status === 'open') {
+    return [
+      { label: 'Resolve', next: 'resolved', variant: 'secondary' },
+      { label: 'Orphan', next: 'orphaned', variant: 'ghost' },
+    ]
+  }
+  return [{ label: 'Reopen', next: 'open', variant: 'secondary' }]
+}
+
+/**
+ * Inline action buttons for moving a thread between statuses.
+ * Lives in the detail header next to the status badge so the user
+ * can resolve, orphan, or reopen without leaving the view they are
+ * already reading.
+ *
+ * Each click calls `updateThreadStatus` over Tauri IPC, then
+ * dispatches `tolaria:thread-updated` so the panel hook re-fetches.
+ * The active thread keeps its id, so the panel stays in detail mode
+ * with the new status reflected in the badge and the available
+ * action set. Failures surface inline next to the actions and are
+ * cleared on the next attempt.
+ */
+function StatusActions({ thread, vaultPath }: StatusActionsProps) {
+  const [pending, setPending] = useState<ThreadStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const transitions = transitionsFor(thread.status)
+
+  const apply = async (next: ThreadStatus) => {
+    if (pending) return
+    setPending(next)
+    setError(null)
+    try {
+      await updateThreadStatus({
+        vaultPath,
+        threadId: thread.id,
+        newStatus: next,
+      })
+      window.dispatchEvent(new CustomEvent(THREAD_UPDATED_EVENT, { detail: {} }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      {transitions.map((t) => (
+        <Button
+          key={t.next}
+          type="button"
+          size="xs"
+          variant={t.variant}
+          disabled={pending !== null}
+          onClick={() => void apply(t.next)}
+          data-testid={`comments-panel-status-${t.next}`}
+        >
+          {pending === t.next ? '…' : t.label}
+        </Button>
+      ))}
+      {error && (
+        <span
+          data-testid="comments-panel-status-error"
+          role="alert"
+          className="text-[10px] text-destructive"
+        >
+          {error}
+        </span>
+      )}
+    </div>
   )
 }
 
