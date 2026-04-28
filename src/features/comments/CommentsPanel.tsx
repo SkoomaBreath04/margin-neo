@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
+import { addComment } from './api'
 import {
   FOCUS_THREAD_EVENT,
   THREAD_CREATED_EVENT,
+  THREAD_UPDATED_EVENT,
   type FocusThreadDetail,
 } from './commentExtension'
 import type { Comment, Thread, ThreadStatus } from './types'
@@ -90,6 +94,7 @@ export function CommentsPanel({ vaultPath, noteRelPath }: CommentsPanelProps) {
     return (
       <ThreadDetailLayout
         thread={activeThread}
+        vaultPath={vaultPath}
         onBack={() => setActiveThreadId(null)}
       />
     )
@@ -195,10 +200,11 @@ function ThreadCard({ thread, onSelect }: ThreadCardProps) {
 
 interface ThreadDetailLayoutProps {
   thread: Thread
+  vaultPath: string
   onBack: () => void
 }
 
-function ThreadDetailLayout({ thread, onBack }: ThreadDetailLayoutProps) {
+function ThreadDetailLayout({ thread, vaultPath, onBack }: ThreadDetailLayoutProps) {
   return (
     <aside
       data-testid="comments-panel"
@@ -237,7 +243,91 @@ function ThreadDetailLayout({ thread, onBack }: ThreadDetailLayoutProps) {
           ))}
         </ol>
       </div>
+
+      {thread.status === 'open' && (
+        <ReplyComposer vaultPath={vaultPath} threadId={thread.id} />
+      )}
     </aside>
+  )
+}
+
+interface ReplyComposerProps {
+  vaultPath: string
+  threadId: string
+}
+
+/**
+ * Bottom-of-detail-view composer for adding a reply to an open
+ * thread. Closed/orphaned threads don't render a composer (status
+ * actions in slice 3.4 will provide a "reopen" affordance).
+ *
+ * Submit is disabled while the textarea is empty/whitespace-only or
+ * while a write is in flight. On success we clear the textarea and
+ * dispatch `tolaria:thread-updated` so the panel hook re-fetches
+ * (the user stays in detail view). On failure we surface a small
+ * inline error and keep the draft so the user can retry.
+ */
+function ReplyComposer({ vaultPath, threadId }: ReplyComposerProps) {
+  const [draft, setDraft] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const trimmed = draft.trim()
+  const canSubmit = trimmed.length > 0 && !submitting
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await addComment({ vaultPath, threadId, body: trimmed })
+      setDraft('')
+      window.dispatchEvent(new CustomEvent(THREAD_UPDATED_EVENT, { detail: {} }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form
+      data-testid="comments-panel-composer"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void handleSubmit()
+      }}
+      className="flex shrink-0 flex-col gap-2 border-t border-border px-3 py-2"
+    >
+      <Textarea
+        data-testid="comments-panel-composer-input"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder="Reply…"
+        disabled={submitting}
+        rows={3}
+        className="min-h-16 resize-none text-xs"
+      />
+      {error && (
+        <p
+          data-testid="comments-panel-composer-error"
+          role="alert"
+          className="text-[11px] text-destructive"
+        >
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!canSubmit}
+          data-testid="comments-panel-composer-submit"
+        >
+          {submitting ? 'Sending…' : 'Reply'}
+        </Button>
+      </div>
+    </form>
   )
 }
 

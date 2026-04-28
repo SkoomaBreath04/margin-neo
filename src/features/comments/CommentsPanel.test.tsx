@@ -3,18 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./api', () => ({
   listThreadsForNote: vi.fn(),
+  addComment: vi.fn(),
 }))
 
-import { listThreadsForNote } from './api'
+import { addComment, listThreadsForNote } from './api'
 
 import { CommentsPanel } from './CommentsPanel'
 import {
   FOCUS_THREAD_EVENT,
   THREAD_CREATED_EVENT,
+  THREAD_UPDATED_EVENT,
 } from './commentExtension'
 import type { Comment, Thread, ThreadStatus } from './types'
 
 const mockedList = vi.mocked(listThreadsForNote)
+const mockedAddComment = vi.mocked(addComment)
 
 interface ThreadOverrides {
   id?: string
@@ -51,6 +54,7 @@ function thread(overrides: ThreadOverrides = {}): Thread {
 
 beforeEach(() => {
   mockedList.mockReset()
+  mockedAddComment.mockReset()
 })
 
 afterEach(() => {
@@ -292,5 +296,122 @@ describe('CommentsPanel — detail mode', () => {
         screen.getByTestId('comments-panel').getAttribute('data-mode'),
       ).toBe('list')
     })
+  })
+})
+
+describe('CommentsPanel — reply composer', () => {
+  it('renders a composer in the open-thread detail view', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    expect(
+      await screen.findByTestId('comments-panel-composer'),
+    ).toBeInTheDocument()
+    const submit = screen.getByTestId(
+      'comments-panel-composer-submit',
+    ) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+  })
+
+  it('does not render a composer for resolved threads', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'resolved' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(
+      await screen.findByTestId('comments-panel-tab-resolved'),
+    )
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    expect(screen.queryByTestId('comments-panel-composer')).toBeNull()
+  })
+
+  it('enables the submit button once the textarea has non-whitespace content', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    const input = await screen.findByTestId(
+      'comments-panel-composer-input',
+    )
+    const submit = screen.getByTestId(
+      'comments-panel-composer-submit',
+    ) as HTMLButtonElement
+
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(submit.disabled).toBe(true)
+
+    fireEvent.change(input, { target: { value: '  hello world  ' } })
+    expect(submit.disabled).toBe(false)
+  })
+
+  it('sends the trimmed body via addComment, clears the textarea, and dispatches THREAD_UPDATED_EVENT', async () => {
+    mockedList.mockResolvedValue([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+    mockedAddComment.mockResolvedValueOnce({
+      id: 'cmt_new',
+      author: 'Tester',
+      body: 'reply body',
+      created_at: '2026-04-28T15:00:00Z',
+      created_at_sha: '0',
+    } as never)
+
+    const updatedListener = vi.fn()
+    window.addEventListener(THREAD_UPDATED_EVENT, updatedListener)
+
+    try {
+      render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+      fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+      const input = (await screen.findByTestId(
+        'comments-panel-composer-input',
+      )) as HTMLTextAreaElement
+      fireEvent.change(input, { target: { value: '  reply body  ' } })
+      fireEvent.click(screen.getByTestId('comments-panel-composer-submit'))
+
+      await waitFor(() => {
+        expect(mockedAddComment).toHaveBeenCalledWith({
+          vaultPath: '/v',
+          threadId: 't1',
+          body: 'reply body',
+        })
+      })
+      await waitFor(() => {
+        expect(input.value).toBe('')
+      })
+      expect(updatedListener).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener(THREAD_UPDATED_EVENT, updatedListener)
+    }
+  })
+
+  it('shows an inline error and preserves the draft when addComment fails', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+    mockedAddComment.mockRejectedValueOnce(new Error('disk full'))
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    const input = (await screen.findByTestId(
+      'comments-panel-composer-input',
+    )) as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: 'first try' } })
+    fireEvent.click(screen.getByTestId('comments-panel-composer-submit'))
+
+    expect(
+      (await screen.findByTestId('comments-panel-composer-error')).textContent,
+    ).toMatch(/disk full/)
+    expect(input.value).toBe('first try')
   })
 })

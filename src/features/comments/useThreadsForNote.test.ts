@@ -7,7 +7,10 @@ vi.mock('./api', () => ({
 
 import { listThreadsForNote } from './api'
 
-import { THREAD_CREATED_EVENT } from './commentExtension'
+import {
+  THREAD_CREATED_EVENT,
+  THREAD_UPDATED_EVENT,
+} from './commentExtension'
 import { useThreadsForNote } from './useThreadsForNote'
 
 const mockedList = vi.mocked(listThreadsForNote)
@@ -55,6 +58,29 @@ describe('useThreadsForNote', () => {
     })
     act(() => {
       window.dispatchEvent(new CustomEvent(THREAD_CREATED_EVENT, { detail: {} }))
+    })
+    await waitFor(() => {
+      expect(result.current).toEqual(updated)
+    })
+    expect(mockedList).toHaveBeenCalledTimes(2)
+  })
+
+  it('refetches when tolaria:thread-updated fires', async () => {
+    const initial = [{ id: 'thr_001', comments: [] }]
+    const updated = [
+      { id: 'thr_001', comments: [{ id: 'c1' }, { id: 'c2' }] },
+    ]
+    mockedList
+      .mockResolvedValueOnce(initial as never)
+      .mockResolvedValueOnce(updated as never)
+    const { result } = renderHook(() =>
+      useThreadsForNote({ vaultPath: '/v', noteRelPath: 'a.md' }),
+    )
+    await waitFor(() => {
+      expect(result.current).toEqual(initial)
+    })
+    act(() => {
+      window.dispatchEvent(new CustomEvent(THREAD_UPDATED_EVENT, { detail: {} }))
     })
     await waitFor(() => {
       expect(result.current).toEqual(updated)

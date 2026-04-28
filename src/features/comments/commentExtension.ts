@@ -26,6 +26,12 @@ export const ADD_COMMENT_EVENT = 'tolaria:add-comment-on-selection'
 export const THREAD_CREATED_EVENT = 'tolaria:thread-created'
 export const THREAD_CREATE_FAILED_EVENT = 'tolaria:thread-create-failed'
 export const FOCUS_THREAD_EVENT = 'tolaria:focus-thread'
+/**
+ * Fires after an existing thread mutates (reply added, status
+ * changed, etc.). Consumers re-fetch but do NOT treat this as a
+ * navigation cue — the user stays where they are.
+ */
+export const THREAD_UPDATED_EVENT = 'tolaria:thread-updated'
 
 export interface AddCommentEventDetail {
   vaultPath: string
