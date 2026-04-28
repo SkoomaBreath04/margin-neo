@@ -106,6 +106,9 @@ export function CommentsPanel({ vaultPath, noteRelPath }: CommentsPanelProps) {
       data-mode="list"
       className="flex w-80 shrink-0 flex-col border-l border-border bg-background"
     >
+      <PanelTitleBar
+        subtitle={`${threads.length} ${threads.length === 1 ? 'thread' : 'threads'}`}
+      />
       <header className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2 text-sm font-medium">
         {STATUS_ORDER.map((status) => {
           const isActive = status === activeStatus
@@ -212,6 +215,7 @@ function ThreadDetailLayout({ thread, vaultPath, onBack }: ThreadDetailLayoutPro
       data-thread-id={thread.id}
       className="flex w-80 shrink-0 flex-col border-l border-border bg-background"
     >
+      <PanelTitleBar subtitle={`Thread · ${STATUS_LABELS[thread.status].toLowerCase()}`} />
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm font-medium">
         <button
           type="button"
@@ -441,6 +445,28 @@ function CommentBubble({ comment }: CommentBubbleProps) {
         {comment.body}
       </p>
     </li>
+  )
+}
+
+interface PanelTitleBarProps {
+  subtitle: string
+}
+
+/**
+ * Visual sibling of the Inspector's panel title bar so the comments
+ * column reads as part of the same right-hand workspace, not a
+ * floating panel. Mirrors Inspector's `text-[13px] font-medium`
+ * styling and uses the same border-bottom rhythm.
+ */
+function PanelTitleBar({ subtitle }: PanelTitleBarProps) {
+  return (
+    <div
+      data-testid="comments-panel-title"
+      className="flex shrink-0 items-baseline justify-between border-b border-border px-3 py-2"
+    >
+      <span className="text-[13px] font-medium text-foreground">Comments</span>
+      <span className="text-[11px] text-muted-foreground">{subtitle}</span>
+    </div>
   )
 }
 

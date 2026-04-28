@@ -74,6 +74,19 @@ describe('CommentsPanel — list mode', () => {
     expect(container.innerHTML).toBe('')
   })
 
+  it('renders a Comments title bar with the total thread count', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+      thread({ id: 't2', status: 'resolved' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+
+    const title = await screen.findByTestId('comments-panel-title')
+    expect(title.textContent).toMatch(/Comments/)
+    expect(title.textContent).toMatch(/2 threads/)
+  })
+
   it('shows per-status counts and defaults to the Open tab', async () => {
     mockedList.mockResolvedValueOnce([
       thread({ id: 't1', status: 'open' }),
