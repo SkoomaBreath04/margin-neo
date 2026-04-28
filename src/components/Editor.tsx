@@ -27,6 +27,7 @@ import {
 import { useRawModeWithFlush } from './useRawModeWithFlush'
 import { AddCommentController } from '../features/comments/AddCommentController'
 import { CommentAnchors } from '../features/comments/CommentAnchors'
+import { CommentsPanel } from '../features/comments/CommentsPanel'
 import { createCommentExtension } from '../features/comments/commentExtension'
 import { createArrowLigaturesExtension } from './arrowLigaturesExtension'
 import { useFilenameAutolinkGuard } from './useFilenameAutolinkGuard'
@@ -458,6 +459,10 @@ function EditorLayout({
               locale={locale}
             />
         }
+        <CommentsPanel
+          vaultPath={vaultPath ?? ''}
+          noteRelPath={activeTab?.entry.path ?? null}
+        />
         {(showAIChat || !inspectorCollapsed) && <ResizeHandle onResize={onInspectorResize} />}
         <EditorRightPanel
           showAIChat={showAIChat}
