@@ -19,8 +19,8 @@ export interface SelectionPositions {
 export interface BlockShape {
   /** BlockNote block id — stable across edits within the same block. */
   id: string
-  /** BlockNote inline content array — opaque shape, walked recursively. */
-  content: unknown
+  /** BlockNote inline content array — opaque shape, walked recursively. Optional because BlockNote's typed editor exposes blocks with `content?: unknown`. */
+  content?: unknown
 }
 
 export interface CapturedSelection {

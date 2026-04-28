@@ -18,7 +18,8 @@
 import { createExtension } from '@blocknote/core'
 
 import { createThread } from './api'
-import { captureSelection, type CapturedSelection } from './selection'
+import { readActiveSelection } from './editorSelection'
+import type { CapturedSelection } from './selection'
 import type { Thread } from './types'
 
 export const ADD_COMMENT_EVENT = 'tolaria:add-comment-on-selection'
@@ -64,16 +65,7 @@ export const createCommentExtension = createExtension(({ editor }) => {
         const detail = (event as CustomEvent<AddCommentEventDetail>).detail
         if (!detail) return
 
-        const view = editor._tiptapEditor?.view ?? editor.prosemirrorView
-        const cursor = editor.getTextCursorPosition?.()
-        if (!view || !cursor?.block) return
-
-        const { from, to } = view.state.selection
-        const selectedText = view.state.doc.textBetween(from, to, ' ', ' ')
-        const captured = captureSelection(
-          { from, to, selectedText },
-          cursor.block,
-        )
+        const captured = readActiveSelection(editor)
 
         try {
           const thread = await handleAddCommentRequest(detail, captured)

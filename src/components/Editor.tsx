@@ -25,6 +25,7 @@ import {
   resolveRawModeContent,
 } from './editorRawModeSync'
 import { useRawModeWithFlush } from './useRawModeWithFlush'
+import { AddCommentController } from '../features/comments/AddCommentController'
 import { createCommentExtension } from '../features/comments/commentExtension'
 import { createArrowLigaturesExtension } from './arrowLigaturesExtension'
 import { useFilenameAutolinkGuard } from './useFilenameAutolinkGuard'
@@ -489,6 +490,11 @@ function EditorLayout({
           locale={locale}
         />
       </div>
+      <AddCommentController
+        editor={editor}
+        vaultPath={vaultPath ?? ''}
+        noteRelPath={activeTab?.entry.path ?? null}
+      />
     </div>
   )
 }
