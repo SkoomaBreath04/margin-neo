@@ -26,6 +26,7 @@ import {
 } from './editorRawModeSync'
 import { useRawModeWithFlush } from './useRawModeWithFlush'
 import { AddCommentController } from '../features/comments/AddCommentController'
+import { CommentAnchors } from '../features/comments/CommentAnchors'
 import { createCommentExtension } from '../features/comments/commentExtension'
 import { createArrowLigaturesExtension } from './arrowLigaturesExtension'
 import { useFilenameAutolinkGuard } from './useFilenameAutolinkGuard'
@@ -492,6 +493,10 @@ function EditorLayout({
       </div>
       <AddCommentController
         editor={editor}
+        vaultPath={vaultPath ?? ''}
+        noteRelPath={activeTab?.entry.path ?? null}
+      />
+      <CommentAnchors
         vaultPath={vaultPath ?? ''}
         noteRelPath={activeTab?.entry.path ?? null}
       />

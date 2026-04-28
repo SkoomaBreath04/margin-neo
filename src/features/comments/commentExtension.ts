@@ -25,6 +25,7 @@ import type { Thread } from './types'
 export const ADD_COMMENT_EVENT = 'tolaria:add-comment-on-selection'
 export const THREAD_CREATED_EVENT = 'tolaria:thread-created'
 export const THREAD_CREATE_FAILED_EVENT = 'tolaria:thread-create-failed'
+export const FOCUS_THREAD_EVENT = 'tolaria:focus-thread'
 
 export interface AddCommentEventDetail {
   vaultPath: string
@@ -34,6 +35,10 @@ export interface AddCommentEventDetail {
 
 export interface ThreadCreateFailedDetail {
   error: string
+}
+
+export interface FocusThreadDetail {
+  threadId: string
 }
 
 /**

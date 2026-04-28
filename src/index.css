@@ -565,3 +565,13 @@
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
 }
+
+/* --- Comment thread anchors (slice 2.6) ---
+ * Applied by `CommentAnchors.tsx` to each block that has at least
+ * one open or resolved (non-orphaned) thread for the active note.
+ * Alt+click on a marked block dispatches `tolaria:focus-thread`.
+ */
+.tolaria-thread-anchor {
+  border-left: 3px solid var(--accent-blue);
+  padding-left: 0.5rem;
+}
