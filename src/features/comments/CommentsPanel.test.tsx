@@ -12,7 +12,7 @@ import {
   FOCUS_THREAD_EVENT,
   THREAD_CREATED_EVENT,
 } from './commentExtension'
-import type { Thread, ThreadStatus } from './types'
+import type { Comment, Thread, ThreadStatus } from './types'
 
 const mockedList = vi.mocked(listThreadsForNote)
 
@@ -22,7 +22,7 @@ interface ThreadOverrides {
   blockId?: string
   body?: string
   author?: string
-  comments?: Thread['comments']
+  comments?: Comment[]
 }
 
 function thread(overrides: ThreadOverrides = {}): Thread {
@@ -57,7 +57,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('CommentsPanel', () => {
+describe('CommentsPanel — list mode', () => {
   it('renders nothing when no threads exist for the note', async () => {
     mockedList.mockResolvedValueOnce([] as never)
     const { container } = render(
@@ -125,55 +125,6 @@ describe('CommentsPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('focus event auto-switches to the target thread\'s status and highlights it', async () => {
-    mockedList.mockResolvedValueOnce([
-      thread({ id: 't1', status: 'open' }),
-      thread({ id: 't2', status: 'resolved' }),
-    ] as never)
-
-    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
-    await screen.findByTestId('comments-panel-tab-open')
-
-    window.dispatchEvent(
-      new CustomEvent(FOCUS_THREAD_EVENT, { detail: { threadId: 't2' } }),
-    )
-
-    await waitFor(() => {
-      const resolvedTab = screen.getByTestId('comments-panel-tab-resolved')
-      expect(resolvedTab.getAttribute('data-active')).toBe('true')
-    })
-
-    const focused = screen.getByTestId('comments-panel-thread')
-    expect(focused.getAttribute('data-thread-id')).toBe('t2')
-    expect(focused.getAttribute('data-focused')).toBe('true')
-  })
-
-  it('clears the highlight on tolaria:thread-created', async () => {
-    // First call is the initial fetch; second is the re-fetch
-    // triggered by THREAD_CREATED_EVENT inside useThreadsForNote.
-    mockedList.mockResolvedValue([
-      thread({ id: 't1', status: 'open' }),
-    ] as never)
-
-    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
-    await screen.findByTestId('comments-panel-tab-open')
-
-    window.dispatchEvent(
-      new CustomEvent(FOCUS_THREAD_EVENT, { detail: { threadId: 't1' } }),
-    )
-    await waitFor(() => {
-      const card = screen.getByTestId('comments-panel-thread')
-      expect(card.getAttribute('data-focused')).toBe('true')
-    })
-
-    window.dispatchEvent(new CustomEvent(THREAD_CREATED_EVENT, { detail: {} }))
-
-    await waitFor(() => {
-      const card = screen.getByTestId('comments-panel-thread')
-      expect(card.getAttribute('data-focused')).toBe('false')
-    })
-  })
-
   it('shows reply count when a thread has replies', async () => {
     mockedList.mockResolvedValueOnce([
       thread({
@@ -206,5 +157,140 @@ describe('CommentsPanel', () => {
 
     render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
     expect(await screen.findByText(/2 replies/)).toBeInTheDocument()
+  })
+})
+
+describe('CommentsPanel — detail mode', () => {
+  it('clicking a thread card opens the detail view', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    const card = await screen.findByTestId('comments-panel-thread')
+    fireEvent.click(card)
+
+    const panel = await screen.findByTestId('comments-panel')
+    expect(panel.getAttribute('data-mode')).toBe('detail')
+    expect(panel.getAttribute('data-thread-id')).toBe('t1')
+  })
+
+  it('renders every comment in the chain in order', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({
+        id: 't1',
+        comments: [
+          {
+            id: 'c1',
+            author: 'A',
+            body: 'first body',
+            created_at: '2026-04-28T11:00:00Z',
+            created_at_sha: '0',
+          },
+          {
+            id: 'c2',
+            author: 'B',
+            body: 'second body',
+            created_at: '2026-04-28T12:00:00Z',
+            created_at_sha: '0',
+          },
+          {
+            id: 'c3',
+            author: 'C',
+            body: 'third body',
+            created_at: '2026-04-28T13:00:00Z',
+            created_at_sha: '0',
+          },
+        ],
+      }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+
+    const bubbles = await screen.findAllByTestId('comments-panel-comment')
+    expect(bubbles.map((b) => b.getAttribute('data-comment-id'))).toEqual([
+      'c1',
+      'c2',
+      'c3',
+    ])
+    expect(bubbles[0].textContent).toMatch(/first body/)
+    expect(bubbles[2].textContent).toMatch(/third body/)
+  })
+
+  it('back button returns to list mode', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+    fireEvent.click(await screen.findByTestId('comments-panel-back'))
+
+    const panel = await screen.findByTestId('comments-panel')
+    expect(panel.getAttribute('data-mode')).toBe('list')
+    expect(screen.queryByTestId('comments-panel-back')).toBeNull()
+  })
+
+  it('focus event opens the matching thread directly in detail mode', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+      thread({ id: 't2', status: 'resolved' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    await screen.findByTestId('comments-panel-tab-open')
+
+    window.dispatchEvent(
+      new CustomEvent(FOCUS_THREAD_EVENT, { detail: { threadId: 't2' } }),
+    )
+
+    await waitFor(() => {
+      const panel = screen.getByTestId('comments-panel')
+      expect(panel.getAttribute('data-mode')).toBe('detail')
+      expect(panel.getAttribute('data-thread-id')).toBe('t2')
+    })
+  })
+
+  it('focus event with unknown threadId leaves the user in list mode', async () => {
+    mockedList.mockResolvedValueOnce([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    await screen.findByTestId('comments-panel-tab-open')
+
+    window.dispatchEvent(
+      new CustomEvent(FOCUS_THREAD_EVENT, { detail: { threadId: 'nope' } }),
+    )
+
+    await Promise.resolve()
+    expect(screen.getByTestId('comments-panel').getAttribute('data-mode')).toBe(
+      'list',
+    )
+  })
+
+  it('thread-created event pops the panel back to list mode', async () => {
+    // The hook re-fetches on THREAD_CREATED_EVENT, so the mock must
+    // resolve more than once.
+    mockedList.mockResolvedValue([
+      thread({ id: 't1', status: 'open' }),
+    ] as never)
+
+    render(<CommentsPanel vaultPath="/v" noteRelPath="a.md" />)
+    fireEvent.click(await screen.findByTestId('comments-panel-thread'))
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('comments-panel').getAttribute('data-mode'),
+      ).toBe('detail')
+    })
+
+    window.dispatchEvent(new CustomEvent(THREAD_CREATED_EVENT, { detail: {} }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('comments-panel').getAttribute('data-mode'),
+      ).toBe('list')
+    })
   })
 })
