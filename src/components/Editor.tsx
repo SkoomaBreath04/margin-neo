@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback, memo } from 'react'
+import { useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useEditorTabSwap } from '../hooks/useEditorTabSwap'
 import { useCreateBlockNote } from '@blocknote/react'
+import { CommentsExtension } from '@blocknote/core/comments'
 import '@blocknote/mantine/style.css'
 import 'katex/dist/katex.min.css'
 import { uploadImageFile } from '../hooks/useImageDrop'
@@ -25,10 +26,7 @@ import {
   resolveRawModeContent,
 } from './editorRawModeSync'
 import { useRawModeWithFlush } from './useRawModeWithFlush'
-import { AddCommentController } from '../features/comments/AddCommentController'
-import { CommentAnchors } from '../features/comments/CommentAnchors'
-import { CommentsPanel } from '../features/comments/CommentsPanel'
-import { createCommentExtension } from '../features/comments/commentExtension'
+import { TolariaThreadStore } from '../features/comments/TolariaThreadStore'
 import { createArrowLigaturesExtension } from './arrowLigaturesExtension'
 import { useFilenameAutolinkGuard } from './useFilenameAutolinkGuard'
 import './Editor.css'
@@ -185,13 +183,48 @@ function useEditorSetup({
   const vaultPathRef = useRef(vaultPath)
   useEffect(() => { vaultPathRef.current = vaultPath }, [vaultPath])
 
+  // Stable per-mount thread store. Constructed before the editor
+  // because `CommentsExtension` needs it at extension-init time.
+  // We patch `vaultPath` and the active note in via setters below.
+  const threadStoreRef = useRef<TolariaThreadStore | null>(null)
+  if (!threadStoreRef.current) {
+    threadStoreRef.current = new TolariaThreadStore({
+      vaultPath: vaultPath ?? '',
+      // TODO(comments-userid): wire to git config user.email in
+      // a follow-up. `local` is a deliberate placeholder and shows
+      // up in the UI as the comment author until then.
+      userId: 'local',
+    })
+  }
+  const threadStore = threadStoreRef.current
+
+  const commentsExtension = useMemo(
+    () =>
+      CommentsExtension({
+        threadStore,
+        resolveUsers: async (ids: string[]) =>
+          ids.map((id) => ({ id, username: id, avatarUrl: '' })),
+      }),
+    [threadStore],
+  )
+
   const editor = useCreateBlockNote({
     schema,
     uploadFile: (file: File) => uploadImageFile(file, vaultPathRef.current),
     _tiptapOptions: { injectNonce: RUNTIME_STYLE_NONCE },
-    extensions: [createArrowLigaturesExtension(), createCommentExtension()],
+    extensions: [createArrowLigaturesExtension(), commentsExtension],
   })
   useFilenameAutolinkGuard(editor)
+
+  // Hook the store into the editor for selection-anchored thread
+  // creation, and switch its active note whenever the visible tab
+  // changes. The store handles the IPC fetch + subscriber notify.
+  useEffect(() => {
+    threadStore.setEditor(editor)
+  }, [editor, threadStore])
+  useEffect(() => {
+    void threadStore.setActiveNote(activeTabPath ?? null)
+  }, [activeTabPath, threadStore])
   const activeTab = tabs.find((t) => t.entry.path === activeTabPath) ?? null
   const {
     rawMode,
@@ -459,10 +492,6 @@ function EditorLayout({
               locale={locale}
             />
         }
-        <CommentsPanel
-          vaultPath={vaultPath ?? ''}
-          noteRelPath={activeTab?.entry.path ?? null}
-        />
         {(showAIChat || !inspectorCollapsed) && <ResizeHandle onResize={onInspectorResize} />}
         <EditorRightPanel
           showAIChat={showAIChat}
@@ -496,15 +525,6 @@ function EditorLayout({
           locale={locale}
         />
       </div>
-      <AddCommentController
-        editor={editor}
-        vaultPath={vaultPath ?? ''}
-        noteRelPath={activeTab?.entry.path ?? null}
-      />
-      <CommentAnchors
-        vaultPath={vaultPath ?? ''}
-        noteRelPath={activeTab?.entry.path ?? null}
-      />
     </div>
   )
 }

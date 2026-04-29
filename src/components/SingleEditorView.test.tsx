@@ -70,6 +70,8 @@ vi.mock('@blocknote/react', () => ({
   ),
   EditLinkButton: () => <button type="button">Edit Link</button>,
   DeleteLinkButton: () => <button type="button">Remove Link</button>,
+  FloatingComposerController: () => null,
+  FloatingThreadController: () => null,
   SideMenuController: () => <div data-testid="side-menu-controller" />,
   SuggestionMenuController: (props: Record<string, unknown>) => {
     state.capturedSuggestionProps[String(props.triggerCharacter)] = props

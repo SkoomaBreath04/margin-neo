@@ -7,6 +7,8 @@ import {
   ComponentsContext,
   DeleteLinkButton,
   EditLinkButton,
+  FloatingComposerController,
+  FloatingThreadController,
   LinkToolbar,
   LinkToolbarController,
   SideMenuController,
@@ -511,6 +513,16 @@ export function SingleEditorView({ editor, entries, onNavigateWikilink, onChange
           suggestionMenuComponent={WikilinkSuggestionMenu}
           onItemClick={(item: WikilinkSuggestionItem) => item.onItemClick()}
         />
+        {/*
+          Native BlockNote comments UI. The CommentsExtension is
+          configured at editor creation time (see Editor.tsx → useEditorSetup
+          → TolariaThreadStore + CommentsExtension). These controllers
+          render the floating composer (when filing a new thread on a
+          selection) and the floating thread card (when clicking an
+          existing highlight).
+        */}
+        <FloatingComposerController />
+        <FloatingThreadController />
       </SharedContextBlockNoteView>
     </div>
   )

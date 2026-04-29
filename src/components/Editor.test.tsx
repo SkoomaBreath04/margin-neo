@@ -95,6 +95,8 @@ vi.mock('@blocknote/react', () => ({
   LinkToolbarController: () => null,
   EditLinkButton: () => null,
   DeleteLinkButton: () => null,
+  FloatingComposerController: () => null,
+  FloatingThreadController: () => null,
   SideMenuController: () => null,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock
   SuggestionMenuController: (props: any) => {
