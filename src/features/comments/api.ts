@@ -5,10 +5,20 @@
  *
  * Tauri auto-converts camelCase JS keys to snake_case Rust args, so
  * `vaultPath` here lands as `vault_path` in the Rust handler.
+ *
+ * Routes through `mockInvoke` when the renderer isn't running
+ * inside Tauri (Playwright smoke / `pnpm dev` browser preview), so
+ * the editor doesn't crash on `invoke` being undefined when it
+ * reads threads for a freshly-created note.
  */
 import { invoke } from '@tauri-apps/api/core'
 
+import { isTauri, mockInvoke } from '../../mock-tauri'
 import type { Comment, Decision, Thread, ThreadStatus } from './types'
+
+function callIpc<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  return isTauri() ? invoke<T>(cmd, args) : mockInvoke<T>(cmd, args)
+}
 
 export interface CreateThreadArgs {
   vaultPath: string
@@ -21,7 +31,7 @@ export interface CreateThreadArgs {
 }
 
 export function createThread(args: CreateThreadArgs): Promise<Thread> {
-  return invoke('create_thread', args)
+  return callIpc('create_thread', args)
 }
 
 export interface AddCommentArgs {
@@ -32,7 +42,7 @@ export interface AddCommentArgs {
 }
 
 export function addComment(args: AddCommentArgs): Promise<Comment> {
-  return invoke('add_comment', args)
+  return callIpc('add_comment', args)
 }
 
 export interface ListThreadsForNoteArgs {
@@ -42,7 +52,7 @@ export interface ListThreadsForNoteArgs {
 }
 
 export function listThreadsForNote(args: ListThreadsForNoteArgs): Promise<Thread[]> {
-  return invoke('list_threads_for_note', args)
+  return callIpc('list_threads_for_note', args)
 }
 
 export interface UpdateThreadStatusArgs {
@@ -53,7 +63,7 @@ export interface UpdateThreadStatusArgs {
 }
 
 export function updateThreadStatus(args: UpdateThreadStatusArgs): Promise<Thread> {
-  return invoke('update_thread_status', args)
+  return callIpc('update_thread_status', args)
 }
 
 export interface PromoteToDecisionArgs {
@@ -66,7 +76,7 @@ export interface PromoteToDecisionArgs {
 }
 
 export function promoteToDecision(args: PromoteToDecisionArgs): Promise<Decision> {
-  return invoke('promote_to_decision', args)
+  return callIpc('promote_to_decision', args)
 }
 
 export interface ListDecisionsArgs {
@@ -76,7 +86,7 @@ export interface ListDecisionsArgs {
 }
 
 export function listDecisions(args: ListDecisionsArgs): Promise<Decision[]> {
-  return invoke('list_decisions', {
+  return callIpc('list_decisions', {
     vaultPath: args.vaultPath,
     noteRelPath: args.noteRelPath ?? null,
     owner: args.owner ?? null,

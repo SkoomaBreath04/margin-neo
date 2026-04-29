@@ -4,6 +4,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
+// Force the api module's `isTauri()` gate to take the Tauri branch
+// so the mocked `invoke` above is the one that gets called instead
+// of falling through to the browser `mockInvoke` handlers.
+vi.mock('../../mock-tauri', async () => {
+  const actual = await vi.importActual<typeof import('../../mock-tauri')>(
+    '../../mock-tauri',
+  )
+  return {
+    ...actual,
+    isTauri: () => true,
+  }
+})
+
 import { invoke } from '@tauri-apps/api/core'
 
 import {

@@ -494,6 +494,58 @@ export const mockHandlers: Record<string, (args: any) => any> = {
     return 'Vault repaired'
   },
   reinit_telemetry: (): null => null,
+
+  // --- Phase-1 comments (browser / Playwright stubs) ---------------
+  // The Rust backend writes `.tolaria/threads/*.json` sidecars; in
+  // browser mode we return empty / no-op so the editor can mount
+  // without bombing on `Cannot read properties of undefined`. Real
+  // QA happens via `pnpm tauri dev`.
+  list_threads_for_note: () => [],
+  list_decisions: () => [],
+  create_thread: (args: {
+    vaultPath: string
+    noteRelPath: string
+    blockId: string
+    blockText: string
+    initialBody: string
+  }) => ({
+    id: `thr_mock_${Date.now()}`,
+    note_rel_path: args.noteRelPath,
+    anchor: {
+      block_id: args.blockId,
+      created_at_sha: '0',
+      content_hash: 'sha256:mock',
+    },
+    status: 'open',
+    comments: [
+      {
+        id: `cmt_mock_${Date.now()}`,
+        author: 'Mock User <mock@example.com>',
+        body: args.initialBody,
+        created_at: new Date().toISOString(),
+        created_at_sha: '0',
+      },
+    ],
+    created_at: new Date().toISOString(),
+    created_at_sha: '0',
+  }),
+  add_comment: (args: { threadId: string; body: string }) => ({
+    id: `cmt_mock_${Date.now()}`,
+    author: 'Mock User <mock@example.com>',
+    body: args.body,
+    created_at: new Date().toISOString(),
+    created_at_sha: '0',
+  }),
+  update_thread_status: (args: { threadId: string; newStatus: string }) => ({
+    id: args.threadId,
+    note_rel_path: '',
+    anchor: { block_id: '', created_at_sha: '0', content_hash: 'sha256:mock' },
+    status: args.newStatus,
+    comments: [],
+    created_at: new Date().toISOString(),
+    created_at_sha: '0',
+  }),
+  promote_to_decision: () => null,
 }
 
 export function addMockEntry(_entry: VaultEntry, content: string): void {
